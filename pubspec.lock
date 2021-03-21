@@ -207,6 +207,15 @@ packages:
       url: "https://pub.dartlang.org"
     source: hosted
     version: "1.0.0"
+  net:
+    dependency: "direct main"
+    description:
+      path: "."
+      ref: HEAD
+      resolved-ref: "2f517b965a520fdfdea182703321e27afa38201b"
+      url: "https://github.com/lamtx/net.git"
+    source: git
+    version: "1.0.0"
   node_preamble:
     dependency: transitive
     description:
