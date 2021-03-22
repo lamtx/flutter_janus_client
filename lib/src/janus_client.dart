@@ -144,8 +144,7 @@ class JanusClient {
   Future<Plugin> attach({
     required String name,
     OnMessageReceived? onMessage,
-    Function(dynamic, bool)? onLocalTrack,
-    Function(dynamic, dynamic, dynamic, bool)? onRemoteTrack,
+    OnRemoteTrack? onRemoteTrack,
     OnLocalStreamReceived? onLocalStream,
     OnRemoteStreamReceived? onRemoteStream,
     OnDataChannelStatusChanged? onDataOpen,
@@ -190,7 +189,6 @@ class JanusClient {
       onDataChannelStatus: onDataOpen,
       onDataMessage: onData,
       onMediaState: onMediaState,
-      onRemoteTrack: onRemoteTrack,
       onDetached: onDetached,
       onDestroy: onDestroy,
     );

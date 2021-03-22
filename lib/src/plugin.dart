@@ -44,7 +44,6 @@ class Plugin {
     required this.onDataMessage,
     required this.onDetached,
     required this.onDestroy,
-    required this.onRemoteTrack,
     required this.onMediaState,
   })   : _sink = sink,
         _obtainTransactionId = obtainTransactionId,
@@ -70,7 +69,6 @@ class Plugin {
   final OnDataMessageReceived? onDataMessage;
   final VoidCallback? onDetached;
   final VoidCallback? onDestroy;
-  final OnRemoteTrack? onRemoteTrack;
   final OnMediaState? onMediaState;
 
   var _dataChannelState = RTCDataChannelState.RTCDataChannelClosed;
@@ -212,7 +210,7 @@ class Plugin {
   ///
   /// you can use this method to get the stream and show live preview of your camera to RTCVideoRendererView
   Future<MediaStream> initializeMediaDevices({
-    Map<String, Object?> mediaConstraints = const <String, Object?>{
+    Map<String, Object?> mediaConstraints = const {
       "audio": true,
       "video": {
         "mandatory": {
@@ -249,8 +247,6 @@ class Plugin {
   Future<void> destroy() async {
     await webRTCHandle.localStream?.dispose();
     await webRTCHandle.peerConnection.dispose();
-    // Why close sink?
-    await _sink.close();
     _pluginHandles.remove(handleId);
   }
 

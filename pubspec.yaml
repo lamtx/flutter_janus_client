@@ -1,15 +1,13 @@
 name: janus_client
 description: janus gateway client for dart
 version: 0.0.4
-homepage: https://github.com/shivanshtalwar0/flutter_janus_client
 publish_to: 'none'
 
 environment:
   sdk: ^2.12.0-0
 
 dependencies:
-  flutter_webrtc:
-    git: https://github.com/flutter-webrtc/flutter-webrtc.git
+  flutter_webrtc: ^0.5.8
   http: ^0.13.0
   net:
     git: https://github.com/lamtx/net.git
