@@ -32,13 +32,13 @@ class Plugin {
   Plugin({
     required this.plugin,
     required this.webRTCHandle,
-    required this.sessionId,
-    required this.obtainTransactionId,
-    required this.transactions,
-    required this.pluginHandles,
-    required this.sink,
-    required this.token,
-    required this.apiSecret,
+    required int sessionId,
+    required ObtainTransactionId obtainTransactionId,
+    required Map<String, void Function(JanusMessage message)> transactions,
+    required Map<int, Plugin> pluginHandles,
+    required WebSocketSink sink,
+    required String? token,
+    required String? apiSecret,
     required this.onMessage,
     required this.onDataChannelStatus,
     required this.onDataMessage,
@@ -46,17 +46,23 @@ class Plugin {
     required this.onDestroy,
     required this.onRemoteTrack,
     required this.onMediaState,
-  });
+  })   : _sink = sink,
+        _obtainTransactionId = obtainTransactionId,
+        _apiSecret = apiSecret,
+        _token = token,
+        _transactions = transactions,
+        _pluginHandles = pluginHandles,
+        _sessionId = sessionId;
 
   final String plugin;
   late final int handleId;
-  final int sessionId;
-  final Map<String, void Function(JanusMessage message)> transactions;
-  final Map<int, Plugin> pluginHandles;
-  final String? token;
-  final String? apiSecret;
-  final WebSocketSink sink;
-  final ObtainTransactionId obtainTransactionId;
+  final int _sessionId;
+  final Map<String, void Function(JanusMessage message)> _transactions;
+  final Map<int, Plugin> _pluginHandles;
+  final String? _token;
+  final String? _apiSecret;
+  final WebSocketSink _sink;
+  final ObtainTransactionId _obtainTransactionId;
 
   final WebRTCHandle webRTCHandle;
   final OnMessageReceived? onMessage;
@@ -74,27 +80,27 @@ class Plugin {
     JsonObject message, {
     RTCSessionDescription? jesp,
   }) {
-    final transaction = obtainTransactionId.next();
+    final transaction = _obtainTransactionId.next();
     final request = {
       "janus": "message",
       "body": message.toJson(),
       "transaction": transaction,
-      "session_id": sessionId,
+      "session_id": _sessionId,
       "handle_id": handleId,
-      if (token != null) "token": token,
-      if (apiSecret != null) "apisecret": apiSecret,
+      if (_token != null) "token": _token,
+      if (_apiSecret != null) "apisecret": _apiSecret,
       if (jesp != null) "jsep": jesp.toMap() as Map,
     };
     final body = json.encode(request);
     final completer = Completer<JanusMessage>();
-    transactions[transaction] = (data) async {
+    _transactions[transaction] = (data) async {
       if (data.jsep != null) {
         await handleRemoteJsep(data.jsep!);
       }
       completer.complete(data);
     };
     assert(log(_tag, "send: $body"));
-    sink.add(body);
+    _sink.add(body);
     return completer.future;
   }
 
@@ -138,11 +144,11 @@ class Plugin {
     if (_dataChannelState != RTCDataChannelState.RTCDataChannelOpen) {
       throw StateError("DataChannel has not been opened yet.");
     }
-    final transaction = obtainTransactionId.next();
+    final transaction = _obtainTransactionId.next();
     final msg = message.toJson() as Map<String, Object>;
     final request = {...msg, "transaction": transaction};
     final completer = Completer<T>();
-    transactions[transaction] = (data) async {
+    _transactions[transaction] = (data) async {
       if (data.jsep != null) {
         await handleRemoteJsep(data.jsep!);
       }
@@ -182,7 +188,7 @@ class Plugin {
         final obj = json.decode(data.text) as Map;
         final message = JanusMessage(obj);
         if (message.transaction != null) {
-          final handler = transactions.remove(message.transaction);
+          final handler = _transactions.remove(message.transaction);
           if (handler != null) {
             handler(message);
           } else {
@@ -244,8 +250,8 @@ class Plugin {
     await webRTCHandle.localStream?.dispose();
     await webRTCHandle.peerConnection.dispose();
     // Why close sink?
-    await sink.close();
-    pluginHandles.remove(handleId);
+    await _sink.close();
+    _pluginHandles.remove(handleId);
   }
 
   Future<RTCSessionDescription> createOffer({

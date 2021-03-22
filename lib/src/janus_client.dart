@@ -212,10 +212,10 @@ class JanusClient {
           "janus": "trickle",
           "candidate": candidate.toMap(),
           "transaction": _obtainTransactionId.next(),
-          "session_id": plugin.sessionId,
+          "session_id": sessionId,
           "handle_id": plugin.handleId,
-          "apisecret": plugin.apiSecret,
-          "token": plugin.token,
+          "apisecret": apiSecret,
+          "token": token,
         };
         channel.sink.add(stringify(request));
       }
