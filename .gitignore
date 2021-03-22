@@ -7,3 +7,5 @@
 build/
 .idea
 janus_client.iml
+/.flutter-plugins
+/.flutter-plugins-dependencies

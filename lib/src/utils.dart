@@ -1,6 +1,4 @@
 import 'dart:convert';
-import 'dart:developer';
-import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
@@ -8,22 +6,8 @@ String stringify(Object? dynamic) {
   return const JsonEncoder().convert(dynamic);
 }
 
-Map parse(String dynamic) {
-  return const JsonDecoder().convert(dynamic) as Map;
-}
-
-String randomString({
-  int len = 10,
-  String charSet =
-      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#\$%^&*()_+',
-}) {
-  final randomString = StringBuffer();
-  for (var i = 0; i < len; i++) {
-    final randomPoz = (Random().nextInt(charSet.length - 1)).floor();
-    randomString.write(charSet.substring(randomPoz, randomPoz + 1));
-  }
-  randomString.write(Timeline.now.toString());
-  return randomString.toString();
+Map parse(String s) {
+  return const JsonDecoder().convert(s) as Map;
 }
 
 bool log(String tagOrMessage, [String? message, Object? exception]) {
