@@ -9,3 +9,4 @@ build/
 janus_client.iml
 /.flutter-plugins
 /.flutter-plugins-dependencies
+/pubspec.lock
