@@ -224,10 +224,11 @@ class Plugin {
       }
     },
   }) async {
-    webRTCHandle.localStream =
+    final localStream =
         await navigator.mediaDevices.getUserMedia(mediaConstraints);
-    await webRTCHandle.peerConnection.addStream(webRTCHandle.localStream);
-    return webRTCHandle.localStream!;
+    webRTCHandle.localStream = localStream;
+    await webRTCHandle.peerConnection.addStream(localStream);
+    return localStream;
   }
 
   /// a utility method which can be used to switch camera of user device if it has more than one camera
