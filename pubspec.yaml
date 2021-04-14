@@ -10,7 +10,7 @@ dependencies:
   flutter_webrtc:
     git:
       url: https://github.com/lamtx/flutter-webrtc
-      ref: 0.6.3
+      ref: 0.6.3-fixed
   http: ^0.13.0
   net:
     git: https://github.com/lamtx/net.git
