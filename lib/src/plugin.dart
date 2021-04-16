@@ -15,11 +15,8 @@ import 'web_rtc_handle.dart';
 typedef OnMessageReceived = void Function(
     Map message, RTCSessionDescription? jsep);
 typedef OnLocalStreamReceived = void Function(List<MediaStream> streams);
-typedef OnRemoteStreamReceived = void Function(MediaStream stream);
 typedef OnDataChannelStatusChanged = void Function(RTCDataChannelState state);
 typedef OnDataMessageReceived = void Function(JanusMessage message);
-typedef OnIceConnectionState = void Function(dynamic);
-typedef OnWebRTCStateChanged = void Function(RTCPeerConnectionState state);
 typedef OnMediaState = void Function(dynamic, dynamic, dynamic);
 typedef OnRemoteTrack = void Function(
     MediaStream stream, MediaStreamTrack track, String trackId, bool);
@@ -185,8 +182,8 @@ class Plugin {
       "audio": true,
       "video": {
         "mandatory": {
-          "minWidth":
-              '1280', // Provide your own width, height and frame rate here
+          // Provide your own width, height and frame rate here
+          "minWidth": '1280',
           "minHeight": '720',
           "minFrameRate": '60',
         },
@@ -219,17 +216,16 @@ class Plugin {
   Future<void> destroy() async {
     _dataTransactions.clear();
     await webRTCHandle.localStream?.dispose();
+    await webRTCHandle.remoteStream?.dispose();
     await webRTCHandle.peerConnection.dispose();
   }
 
-  Future<RTCSessionDescription> createOffer({
-    bool offerToReceiveAudio = true,
-    bool offerToReceiveVideo = true,
-  }) async {
-    final offerOptions = {
-      "offerToReceiveAudio": offerToReceiveAudio,
-      "offerToReceiveVideo": offerToReceiveVideo
-    };
+  Future<RTCSessionDescription> createOffer([
+    Map<String, Object?> offerOptions = const {
+      "offerToReceiveAudio": true,
+      "offerToReceiveVideo": true,
+    },
+  ]) async {
     final offer = await webRTCHandle.peerConnection.createOffer(offerOptions);
     await webRTCHandle.peerConnection.setLocalDescription(offer);
     return offer;
@@ -244,5 +240,13 @@ class Plugin {
     final offer = await webRTCHandle.peerConnection.createAnswer(offerOptions);
     await webRTCHandle.peerConnection.setLocalDescription(offer);
     return offer;
+  }
+
+  Future<void> restartIce() {
+    return createOffer(const {
+      "mandatory": {
+        "IceRestart": true,
+      }
+    });
   }
 }

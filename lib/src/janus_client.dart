@@ -28,13 +28,11 @@ class JanusClient {
     this.apiSecret,
     this.token,
     this.maxEvent = 10,
-    this.withCredentials = false,
   });
 
   final String server;
   final String? apiSecret;
   final String? token;
-  final bool withCredentials;
   final int maxEvent;
   final List<RtcIceServer> iceServers;
   final int refreshInterval;
@@ -47,19 +45,7 @@ class JanusClient {
 
   final _obtainTransactionId = ObtainTransactionId();
   final _transactions = <String, void Function(JanusMessage)>{};
-  final _pluginHandles = <int, Plugin>{};
-
-  Map<String, Object?> get _apiMap => withCredentials
-      ? apiSecret != null
-          ? {"apisecret": apiSecret}
-          : const {}
-      : const {};
-
-  Map<String, Object?> get _tokenMap => withCredentials
-      ? token != null
-          ? {"token": token}
-          : const {}
-      : const {};
+  final _plugins = <int, Plugin>{};
 
   IOWebSocketChannel? _webSocketChannel;
 
@@ -69,7 +55,7 @@ class JanusClient {
 
   /// Generates sessionId and returns it as callback value in onSuccess Function, whereas in case of any connection errors is thrown in onError callback if provided.
   Future<void> connect() async {
-    destroy(keepSessionId: true);
+    _closeSocket();
     if (!server.startsWith('ws') && !server.startsWith('wss')) {
       throw UnsupportedError('Only supports ws/wss interface');
     }
@@ -89,12 +75,15 @@ class JanusClient {
       assert(log(_tag, "event: $s"));
       final data = parse(s as String);
       _handleEvent(JanusMessage(data));
+    }, onError: (dynamic e) {
+      assert(log(_tag, "Janus web socket error", e as Object?));
+    }, onDone: () {
+      assert(log(_tag, "Janus client closed"));
+      _reconnect();
     });
 
     final data = await addTransaction({
       "janus": _sessionId == null ? "create" : "claim",
-      ..._apiMap,
-      ..._tokenMap
     });
     assert(log(_tag, "client connected"));
     if (data.janus == "success") {
@@ -107,14 +96,17 @@ class JanusClient {
     }
   }
 
-  Future<JanusMessage> addTransaction(Map<String, Object?> message) {
+  Future<JanusMessage> addTransaction(
+    Map<String, Object?> message, {
+    bool requireToken = false,
+  }) {
     final transaction = _obtainTransactionId.next();
     final request = {
       ...message,
       "transaction": transaction,
       if (_sessionId != null) "session_id": _sessionId,
-      if (token != null) "token": token,
-      if (apiSecret != null) "apisecret": apiSecret,
+      if (requireToken && token != null) "token": token,
+      if (requireToken && apiSecret != null) "apisecret": apiSecret,
     };
     final body = json.encode(request);
     final completer = Completer<JanusMessage>();
@@ -127,15 +119,17 @@ class JanusClient {
   }
 
   /// cleans up rest polling timer or WebSocket connection if used.
-  void destroy({bool keepSessionId = false}) {
+  void destroy() {
+    _closeSocket();
+    _connected = false;
+    _plugins.clear();
+    _sessionId = null;
+  }
+
+  void _closeSocket() {
     _keepAliveTimer?.cancel();
     _webSocketChannel?.sink.close();
-    _pluginHandles.clear();
     _transactions.clear();
-    _connected = false;
-    if (!keepSessionId) {
-      _sessionId = null;
-    }
   }
 
   void _keepAlive() {
@@ -148,13 +142,9 @@ class JanusClient {
           return;
         }
         try {
-          _webSocketChannel?.sink.add(stringify({
+          await addTransaction({
             "janus": "keepalive",
-            "session_id": _sessionId,
-            "transaction": _obtainTransactionId.next(),
-            ..._apiMap,
-            ..._tokenMap
-          }));
+          });
         } on Exception catch (e) {
           assert(log(_tag, "Keep alive error", e));
           timer.cancel();
@@ -163,6 +153,11 @@ class JanusClient {
     );
   }
 
+  void _reconnect() {
+    if (_sessionId == null) {
+      return;
+    }
+  }
   /*
   * // According to this [Issue](https://github.com/meetecho/janus-gateway/issues/124) we cannot change Data channel Label
   * */
@@ -174,17 +169,14 @@ class JanusClient {
     OnMessageReceived? onMessage,
     OnRemoteTrack? onRemoteTrack,
     OnLocalStreamReceived? onLocalStream,
-    OnRemoteStreamReceived? onRemoteStream,
+    AddStreamCallback? onRemoteStream,
     OnDataChannelStatusChanged? onDataOpen,
     OnDataMessageReceived? onData,
-    OnIceConnectionState? onIceConnectionState,
-    OnWebRTCStateChanged? onWebRTCState,
     VoidCallback? onDetached,
     VoidCallback? onDestroy,
     OnMediaState? onMediaState,
   }) async {
-    final channel = _webSocketChannel;
-    if (channel == null) {
+    if (_webSocketChannel == null) {
       throw StateError("Janus client has not been initialized");
     }
     final configuration = <String, Object?>{
@@ -207,14 +199,16 @@ class JanusClient {
     );
 
     onLocalStream?.call(peerConnection.getLocalStreams());
-
-    peerConnection.onAddStream = (stream) {
-      onRemoteStream?.call(stream);
-    };
-
-    peerConnection.onConnectionState = (state) {
-      onWebRTCState?.call(state);
-    };
+    peerConnection.onAddStream = onRemoteStream;
+    assert(() {
+      peerConnection.onConnectionState = (state) {
+        log(_tag, "onConnectionState $state");
+      };
+      peerConnection.onIceConnectionState = (state) {
+        log(_tag, "onIceConnectionState $state");
+      };
+      return true;
+    }());
 
     peerConnection.onIceCandidate = (candidate) {
       if (!name.contains('textroom')) {
@@ -238,7 +232,7 @@ class JanusClient {
       final handleId = (data.data["data"] as Map)["id"] as int;
       assert(log(_tag, "Created handle: $handleId"));
       plugin.handleId = handleId;
-      _pluginHandles[handleId] = plugin;
+      _plugins[handleId] = plugin;
       return plugin;
     }
   }
@@ -268,7 +262,7 @@ class JanusClient {
       assert(log(_tag, "missing sender ${message.sender}"));
       return;
     }
-    final plugin = _pluginHandles[message.sender];
+    final plugin = _plugins[message.sender];
     if (plugin == null) {
       assert(log(_tag, "no plugin handle for ${message.sender}"));
       return;
@@ -302,7 +296,7 @@ class JanusClient {
       case "slowlink":
         break;
       case "hangup":
-        _pluginHandles.remove(message.sender);
+        _plugins.remove(message.sender);
         plugin.onDestroy?.call();
         break;
       case "detached":
