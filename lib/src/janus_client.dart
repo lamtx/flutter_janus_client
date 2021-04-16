@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:developer';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -66,52 +69,73 @@ class JanusClient {
 
   /// Generates sessionId and returns it as callback value in onSuccess Function, whereas in case of any connection errors is thrown in onError callback if provided.
   Future<void> connect() async {
+    destroy(keepSessionId: true);
     if (!server.startsWith('ws') && !server.startsWith('wss')) {
       throw UnsupportedError('Only supports ws/wss interface');
     }
     _connected = false;
-    final transaction = _obtainTransactionId.next();
-    final webSocketChannel = IOWebSocketChannel.connect(
+
+    assert(log(_tag, "connecting"));
+    final webSocket = await WebSocket.connect(
       server,
-      protocols: ['janus-protocol'],
-      pingInterval: const Duration(seconds: 2),
+      protocols: ["janus-protocol"],
     );
+    webSocket.pingInterval = const Duration(minutes: 1);
+    final webSocketChannel = IOWebSocketChannel(webSocket);
     _webSocketChannel = webSocketChannel;
-    final completer = Completer<void>();
+    assert(log(_tag, "client connected"));
+
     webSocketChannel.stream.listen((dynamic s) {
-      assert(log(_tag, "Event: $s"));
+      assert(log(_tag, "event: $s"));
       final data = parse(s as String);
       _handleEvent(JanusMessage(data));
     });
-    _transactions[transaction] = (data) {
-      if (data.janus == "success") {
-        _sessionId = data.data["data"]["id"] as int;
-        _connected = true;
-        _keepAlive();
-        completer.complete();
-      } else {
-        assert(log(_tag, "Janus exception: $data"));
-        completer.completeError(JanusResponseException(data));
-      }
-    };
 
-    webSocketChannel.sink.add(stringify({
-      "janus": "create",
-      "transaction": transaction,
+    final data = await addTransaction({
+      "janus": _sessionId == null ? "create" : "claim",
       ..._apiMap,
       ..._tokenMap
-    }));
+    });
+    assert(log(_tag, "client connected"));
+    if (data.janus == "success") {
+      _sessionId ??= data.data["data"]["id"] as int;
+      _connected = true;
+      _keepAlive();
+    } else {
+      assert(log(_tag, "Janus exception: $data"));
+      throw JanusResponseException(data);
+    }
+  }
+
+  Future<JanusMessage> addTransaction(Map<String, Object?> message) {
+    final transaction = _obtainTransactionId.next();
+    final request = {
+      ...message,
+      "transaction": transaction,
+      if (_sessionId != null) "session_id": _sessionId,
+      if (token != null) "token": token,
+      if (apiSecret != null) "apisecret": apiSecret,
+    };
+    final body = json.encode(request);
+    final completer = Completer<JanusMessage>();
+    _transactions[transaction] = (data) async {
+      completer.complete(data);
+    };
+    assert(log(_tag, "send: $body"));
+    _webSocketChannel!.sink.add(body);
     return completer.future;
   }
 
   /// cleans up rest polling timer or WebSocket connection if used.
-  void destroy() {
+  void destroy({bool keepSessionId = false}) {
     _keepAliveTimer?.cancel();
     _webSocketChannel?.sink.close();
     _pluginHandles.clear();
     _transactions.clear();
-    _sessionId = null;
     _connected = false;
+    if (!keepSessionId) {
+      _sessionId = null;
+    }
   }
 
   void _keepAlive() {
@@ -119,6 +143,10 @@ class JanusClient {
     _keepAliveTimer = Timer.periodic(
       Duration(seconds: refreshInterval),
       (timer) async {
+        if (!_connected) {
+          timer.cancel();
+          return;
+        }
         try {
           _webSocketChannel?.sink.add(stringify({
             "janus": "keepalive",
@@ -159,15 +187,6 @@ class JanusClient {
     if (channel == null) {
       throw StateError("Janus client has not been initialized");
     }
-    final transaction = _obtainTransactionId.next();
-    final request = <String, Object?>{
-      "janus": "attach",
-      "plugin": name,
-      "transaction": transaction,
-      "token": token,
-      "apisecret": apiSecret,
-      "session_id": sessionId,
-    };
     final configuration = <String, Object?>{
       "iceServers": iceServers.map((e) => e.toMap()).toList(),
       'sdpSemantics': 'plan-b',
@@ -178,13 +197,7 @@ class JanusClient {
     final plugin = Plugin(
       plugin: name,
       webRTCHandle: webRTCHandle,
-      obtainTransactionId: _obtainTransactionId,
-      apiSecret: apiSecret,
-      sessionId: _sessionId!,
-      token: token,
-      pluginHandles: _pluginHandles,
-      transactions: _transactions,
-      sink: channel.sink,
+      client: this,
       onMessage: onMessage,
       onDataChannelStatus: onDataOpen,
       onDataMessage: onData,
@@ -203,37 +216,31 @@ class JanusClient {
       onWebRTCState?.call(state);
     };
 
-    peerConnection.onIceCandidate = (candidate) async {
+    peerConnection.onIceCandidate = (candidate) {
       if (!name.contains('textroom')) {
         assert(log(_tag, 'sending trickle'));
-        final request = <String, Object?>{
+        addTransaction({
           "janus": "trickle",
           "candidate": candidate.toMap(),
-          "transaction": _obtainTransactionId.next(),
-          "session_id": sessionId,
           "handle_id": plugin.handleId,
-          "apisecret": apiSecret,
-          "token": token,
-        };
-        channel.sink.add(stringify(request));
+        });
       }
     };
 
-    final completer = Completer<Plugin>();
-    _transactions[transaction] = (data) {
-      if (data.janus != "success") {
-        completer.completeError(JanusResponseException(data));
-      } else {
-        final handleId = (data.data["data"] as Map)["id"] as int;
-        assert(log(_tag, "Created handle: $handleId"));
-        plugin.handleId = handleId;
-        _pluginHandles[handleId] = plugin;
-        completer.complete(plugin);
-      }
-    };
-
-    channel.sink.add(stringify(request));
-    return completer.future;
+    final data = await addTransaction({
+      "janus": "attach",
+      "plugin": name,
+      "token": token,
+    });
+    if (data.janus != "success") {
+      throw JanusResponseException(data);
+    } else {
+      final handleId = (data.data["data"] as Map)["id"] as int;
+      assert(log(_tag, "Created handle: $handleId"));
+      plugin.handleId = handleId;
+      _pluginHandles[handleId] = plugin;
+      return plugin;
+    }
   }
 
   void _handleEvent(JanusMessage message) {

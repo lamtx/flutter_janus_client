@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:net/net.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'janus_client.dart';
 import 'janus_message.dart';
@@ -32,36 +31,18 @@ class Plugin {
   Plugin({
     required this.plugin,
     required this.webRTCHandle,
-    required int sessionId,
-    required ObtainTransactionId obtainTransactionId,
-    required Map<String, void Function(JanusMessage message)> transactions,
-    required Map<int, Plugin> pluginHandles,
-    required WebSocketSink sink,
-    required String? token,
-    required String? apiSecret,
+    required JanusClient client,
     required this.onMessage,
     required this.onDataChannelStatus,
     required this.onDataMessage,
     required this.onDetached,
     required this.onDestroy,
     required this.onMediaState,
-  })   : _sink = sink,
-        _obtainTransactionId = obtainTransactionId,
-        _apiSecret = apiSecret,
-        _token = token,
-        _transactions = transactions,
-        _pluginHandles = pluginHandles,
-        _sessionId = sessionId;
+  }) : _client = client;
 
   final String plugin;
   late final int handleId;
-  final int _sessionId;
-  final Map<String, void Function(JanusMessage message)> _transactions;
-  final Map<int, Plugin> _pluginHandles;
-  final String? _token;
-  final String? _apiSecret;
-  final WebSocketSink _sink;
-  final ObtainTransactionId _obtainTransactionId;
+  final JanusClient _client;
 
   final WebRTCHandle webRTCHandle;
   final OnMessageReceived? onMessage;
@@ -72,34 +53,24 @@ class Plugin {
   final OnMediaState? onMediaState;
 
   var _dataChannelState = RTCDataChannelState.RTCDataChannelClosed;
+  final _obtainDataTransactionId = ObtainTransactionId();
+  final _dataTransactions = <String, void Function(JanusMessage)>{};
   static const _tag = "Janus";
 
   Future<JanusMessage> send(
     JsonObject message, {
     RTCSessionDescription? jesp,
-  }) {
-    final transaction = _obtainTransactionId.next();
-    final request = {
+  }) async {
+    final data = await _client.addTransaction({
       "janus": "message",
       "body": message.toJson(),
-      "transaction": transaction,
-      "session_id": _sessionId,
       "handle_id": handleId,
-      if (_token != null) "token": _token,
-      if (_apiSecret != null) "apisecret": _apiSecret,
       if (jesp != null) "jsep": jesp.toMap() as Map,
-    };
-    final body = json.encode(request);
-    final completer = Completer<JanusMessage>();
-    _transactions[transaction] = (data) async {
-      if (data.jsep != null) {
-        await handleRemoteJsep(data.jsep!);
-      }
-      completer.complete(data);
-    };
-    assert(log(_tag, "send: $body"));
-    _sink.add(body);
-    return completer.future;
+    });
+    if (data.jsep != null) {
+      await handleRemoteJsep(data.jsep!);
+    }
+    return data;
   }
 
   Future<T> sendAsync<T>(
@@ -142,11 +113,11 @@ class Plugin {
     if (_dataChannelState != RTCDataChannelState.RTCDataChannelOpen) {
       throw StateError("DataChannel has not been opened yet.");
     }
-    final transaction = _obtainTransactionId.next();
+    final transaction = _obtainDataTransactionId.next();
     final msg = message.toJson() as Map<String, Object>;
     final request = {...msg, "transaction": transaction};
     final completer = Completer<T>();
-    _transactions[transaction] = (data) async {
+    _dataTransactions[transaction] = (data) async {
       if (data.jsep != null) {
         await handleRemoteJsep(data.jsep!);
       }
@@ -186,7 +157,7 @@ class Plugin {
         final obj = json.decode(data.text) as Map;
         final message = JanusMessage(obj);
         if (message.transaction != null) {
-          final handler = _transactions.remove(message.transaction);
+          final handler = _dataTransactions.remove(message.transaction);
           if (handler != null) {
             handler(message);
           } else {
@@ -246,9 +217,9 @@ class Plugin {
 
   /// Cleans Up everything related to individual plugin handle
   Future<void> destroy() async {
+    _dataTransactions.clear();
     await webRTCHandle.localStream?.dispose();
     await webRTCHandle.peerConnection.dispose();
-    _pluginHandles.remove(handleId);
   }
 
   Future<RTCSessionDescription> createOffer({
@@ -270,17 +241,8 @@ class Plugin {
       "offerToReceiveVideo": true,
     },
   }) async {
-    // try {
     final offer = await webRTCHandle.peerConnection.createAnswer(offerOptions);
     await webRTCHandle.peerConnection.setLocalDescription(offer);
     return offer;
-    // } catch (e) {
-    //   // TODO: why we try twice?
-    //   assert(log(_tag, "We create answer twice", e));
-    //   final offer =
-    //       await webRTCHandle.peerConnection.createAnswer(offerOptions);
-    //   await webRTCHandle.peerConnection.setLocalDescription(offer);
-    //   return offer;
-    // }
   }
 }
