@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:developer';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -24,24 +23,22 @@ class JanusClient {
   JanusClient({
     required this.server,
     required this.iceServers,
-    this.refreshInterval = 50,
+    this.pingInterval = const Duration(seconds: 50),
     this.apiSecret,
     this.token,
-    this.maxEvent = 10,
   });
 
   final String server;
   final String? apiSecret;
   final String? token;
-  final int maxEvent;
   final List<RtcIceServer> iceServers;
-  final int refreshInterval;
-
+  final Duration pingInterval;
+  VoidCallback? onClientDisconnected;
   static const _tag = "Janus";
 
   Timer? _keepAliveTimer;
-  bool _connected = false;
   int? _sessionId;
+  bool _isConnected = false;
 
   final _obtainTransactionId = ObtainTransactionId();
   final _transactions = <String, void Function(JanusMessage)>{};
@@ -49,18 +46,12 @@ class JanusClient {
 
   IOWebSocketChannel? _webSocketChannel;
 
-  bool get isConnected => _connected;
-
-  int? get sessionId => _sessionId;
-
   /// Generates sessionId and returns it as callback value in onSuccess Function, whereas in case of any connection errors is thrown in onError callback if provided.
   Future<void> connect() async {
     _closeSocket();
     if (!server.startsWith('ws') && !server.startsWith('wss')) {
       throw UnsupportedError('Only supports ws/wss interface');
     }
-    _connected = false;
-
     assert(log(_tag, "connecting"));
     final webSocket = await WebSocket.connect(
       server,
@@ -73,13 +64,13 @@ class JanusClient {
 
     webSocketChannel.stream.listen((dynamic s) {
       assert(log(_tag, "event: $s"));
-      final data = parse(s as String);
+      final data = const JsonDecoder().convert(s as String) as Map;
       _handleEvent(JanusMessage(data));
     }, onError: (dynamic e) {
       assert(log(_tag, "Janus web socket error", e as Object?));
     }, onDone: () {
       assert(log(_tag, "Janus client closed"));
-      _reconnect();
+      _closeSocket();
     });
 
     final data = await addTransaction({
@@ -88,10 +79,11 @@ class JanusClient {
     assert(log(_tag, "client connected"));
     if (data.janus == "success") {
       _sessionId ??= data.data["data"]["id"] as int;
-      _connected = true;
+      _changeStatus(isConnected: true);
       _keepAlive();
     } else {
       assert(log(_tag, "Janus exception: $data"));
+      _closeSocket();
       throw JanusResponseException(data);
     }
   }
@@ -120,13 +112,13 @@ class JanusClient {
 
   /// cleans up rest polling timer or WebSocket connection if used.
   void destroy() {
-    _closeSocket();
-    _connected = false;
-    _plugins.clear();
     _sessionId = null;
+    _closeSocket();
+    _plugins.clear();
   }
 
   void _closeSocket() {
+    _changeStatus(isConnected: false);
     _keepAliveTimer?.cancel();
     _webSocketChannel?.sink.close();
     _transactions.clear();
@@ -134,30 +126,38 @@ class JanusClient {
 
   void _keepAlive() {
     _keepAliveTimer?.cancel();
-    _keepAliveTimer = Timer.periodic(
-      Duration(seconds: refreshInterval),
-      (timer) async {
-        if (!_connected) {
-          timer.cancel();
-          return;
-        }
-        try {
-          await addTransaction({
-            "janus": "keepalive",
-          });
-        } on Exception catch (e) {
-          assert(log(_tag, "Keep alive error", e));
-          timer.cancel();
-        }
-      },
-    );
+    _keepAliveTimer = Timer.periodic(pingInterval, (timer) async {
+      if (!_isConnected) {
+        return;
+      }
+      try {
+        await addTransaction({
+          "janus": "keepalive",
+        });
+      } on Exception catch (e) {
+        assert(log(_tag, "Keep alive error", e));
+      }
+    });
   }
 
-  void _reconnect() {
+  void _changeStatus({required bool isConnected}) {
+    final shouldCall = _isConnected && !isConnected;
+    _isConnected = isConnected;
+    if (shouldCall) {
+      onClientDisconnected?.call();
+    }
+  }
+
+  Future<void> reconnect() async {
     if (_sessionId == null) {
       return;
     }
+    await connect();
+    for (final plugin in _plugins.values) {
+      await plugin.restartIce();
+    }
   }
+
   /*
   * // According to this [Issue](https://github.com/meetecho/janus-gateway/issues/124) we cannot change Data channel Label
   * */
@@ -244,7 +244,7 @@ class JanusClient {
       return;
     }
     if (janus == "timeout") {
-      assert(log(_tag, "ETimeout on session $sessionId"));
+      assert(log(_tag, "ETimeout on session $_sessionId"));
       _webSocketChannel?.sink.close(3504, "Gateway timeout");
       return;
     }
@@ -273,7 +273,7 @@ class JanusClient {
       case "trickle":
         // We got a trickle candidate from Janus
         final candidate = message.data["candidate"] as Map;
-        assert(log(_tag, "Got a trickled candidate on session $sessionId"));
+        assert(log(_tag, "Got a trickled candidate on session $_sessionId"));
         final config = plugin.webRTCHandle;
         if (!plugin.plugin.contains('textroom')) {
           // Add candidate right now
@@ -305,7 +305,7 @@ class JanusClient {
         break;
       case "media":
         // Media started/stopped flowing
-        assert(log(_tag, "got a media event on session $sessionId"));
+        assert(log(_tag, "got a media event on session $_sessionId"));
         plugin.onMediaState?.call(message.data["type"],
             message.data["receiving"], message.data["mid"]);
         break;

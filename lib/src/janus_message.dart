@@ -1,5 +1,6 @@
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
+import 'janus_error.dart';
 import 'plugin_data.dart';
 
 class JanusMessage {
@@ -13,6 +14,7 @@ class JanusMessage {
   RTCSessionDescription? _jsep;
   int _initializedFields = 0;
   PluginData? _pluginData;
+  JanusError? _error;
 
   void _set(int index) {
     _initializedFields |= 0x01 << 0;
@@ -67,5 +69,19 @@ class JanusMessage {
       }
     }
     return _pluginData;
+  }
+
+  JanusError? get error {
+    if (_unset(4)) {
+      _set(4);
+      final json = data["error"] as Map?;
+      if (json != null) {
+        _error = JanusError(
+          code: json["code"] as int,
+          reason: json["reason"] as String,
+        );
+      }
+    }
+    return _error;
   }
 }
