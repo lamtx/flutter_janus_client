@@ -10,8 +10,9 @@ class JanusError {
   }
 
   final int code;
-  final String reason;
+  final String? reason;
 
-
-  static const int codeSessionNotFound = 458;
+  static const int sessionNotFound = 458;
+  static const int janusVideoRoomErrorNoSuchFeed = 428;
+  static const int janusVideoRoomErrorNoSuchRoom = 426;
 }

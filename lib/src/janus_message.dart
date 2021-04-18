@@ -78,7 +78,7 @@ class JanusMessage {
       if (json != null) {
         _error = JanusError(
           code: json["code"] as int,
-          reason: json["reason"] as String,
+          reason: json["reason"] as String?,
         );
       }
     }

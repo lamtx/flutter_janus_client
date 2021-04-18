@@ -1,3 +1,4 @@
+import 'janus_error.dart';
 import 'janus_message.dart';
 
 class JanusResponseException implements Exception {
@@ -5,23 +6,18 @@ class JanusResponseException implements Exception {
 
   final JanusMessage response;
 
-  @override
-  String toString() {
-    if (response.data.containsKey("error")) {
-      final dynamic error = response.data["error"];
-      if (error is String) {
-        return error;
-      } else if (error is Map) {
-        return error["reason"] as String;
-      }
-    } else {
-      final pluginData = response.pluginData;
-      if (pluginData != null) {
-        if (pluginData.data.containsKey("error")) {
-          return pluginData.data["error"] as String;
-        }
+  JanusError? get innerError {
+    if (response.error != null) {
+      return response.error;
+    }
+    final data = response.pluginData?.data;
+    if (data != null) {
+      if (data.containsKey("error_code")) {
+        return JanusError(
+          code: data["error_code"] as int,
+          reason: data["error"] as String?,
+        );
       }
     }
-    return "JanusResponseException";
   }
 }

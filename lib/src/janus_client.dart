@@ -23,7 +23,7 @@ class JanusClient {
   JanusClient({
     required this.server,
     required this.iceServers,
-    this.pingInterval = const Duration(seconds: 50),
+    this.pingInterval = const Duration(seconds: 30),
     this.apiSecret,
     this.token,
   });
@@ -57,7 +57,7 @@ class JanusClient {
       server,
       protocols: ["janus-protocol"],
     );
-    webSocket.pingInterval = const Duration(minutes: 1);
+    webSocket.pingInterval = const Duration(seconds: 10);
     final webSocketChannel = IOWebSocketChannel(webSocket);
     _webSocketChannel = webSocketChannel;
     assert(log(_tag, "client connected"));
@@ -200,24 +200,29 @@ class JanusClient {
 
     onLocalStream?.call(peerConnection.getLocalStreams());
     peerConnection.onAddStream = onRemoteStream;
-    assert(() {
-      peerConnection.onConnectionState = (state) {
-        log(_tag, "onConnectionState $state");
-      };
-      peerConnection.onIceConnectionState = (state) {
-        log(_tag, "onIceConnectionState $state");
-      };
-      return true;
-    }());
+    peerConnection.onConnectionState = (state) {
+      assert(log(_tag, "onConnectionState $name $state"));
+    };
+    peerConnection.onIceConnectionState = (state) {
+      assert(log(_tag, "onIceConnectionState $name $state"));
+      if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+        if (_isConnected) {
+          assert(log(_tag, "onIceConnectionState restart ice"));
+          plugin.restartIce();
+        }
+      }
+    };
 
     peerConnection.onIceCandidate = (candidate) {
       if (!name.contains('textroom')) {
         assert(log(_tag, 'sending trickle'));
-        addTransaction({
-          "janus": "trickle",
-          "candidate": candidate.toMap(),
-          "handle_id": plugin.handleId,
-        });
+        if (_isConnected) {
+          addTransaction({
+            "janus": "trickle",
+            "candidate": candidate.toMap(),
+            "handle_id": plugin.handleId,
+          });
+        }
       }
     };
 
