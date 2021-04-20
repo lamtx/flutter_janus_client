@@ -183,9 +183,9 @@ class Plugin {
       "video": {
         "mandatory": {
           // Provide your own width, height and frame rate here
-          "minWidth": '1280',
-          "minHeight": '720',
-          "minFrameRate": '60',
+          // "minWidth": '1280',
+          // "minHeight": '720',
+          // "minFrameRate": '60',
         },
         "facingMode": "user",
         "optional": <Object>[],
