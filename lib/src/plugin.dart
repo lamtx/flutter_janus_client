@@ -177,11 +177,13 @@ class Plugin {
   /// method that generates MediaStream from your device camera that will be automatically added to peer connection instance internally used by janus client
   ///
   /// you can use this method to get the stream and show live preview of your camera to RTCVideoRendererView
-  Future<MediaStream> initializeMediaDevices({
-    Map<String, Object?> mediaConstraints = const {
+  Future<MediaStream> initializeMediaDevices([
+    Map<String, Object?> mediaConstraints = const {},
+  ]) async {
+    const defaultConstraint = <String, Object?>{
       "audio": true,
       "video": {
-        "mandatory": {
+        "mandatory": <String, String>{
           // Provide your own width, height and frame rate here
           // "minWidth": '1280',
           // "minHeight": '720',
@@ -190,10 +192,10 @@ class Plugin {
         "facingMode": "user",
         "optional": <Object>[],
       }
-    },
-  }) async {
-    final localStream =
-        await navigator.mediaDevices.getUserMedia(mediaConstraints);
+    };
+    final constraints =
+        mediaConstraints.isEmpty ? defaultConstraint : mediaConstraints;
+    final localStream = await navigator.mediaDevices.getUserMedia(constraints);
     webRTCHandle.localStream = localStream;
     await webRTCHandle.peerConnection.addStream(localStream);
     return localStream;
